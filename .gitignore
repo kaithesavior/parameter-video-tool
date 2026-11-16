@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+output/
+coverage/
+
+# Keep the bundled example required by the prepared contour track.
+!assets/biceps-source.mov
+
+# Muscle mask generator: local Python env, SAM 2 cache and previews.
+.venv/
+__pycache__/
+arm-cache.npz
+mask-preview.jpg

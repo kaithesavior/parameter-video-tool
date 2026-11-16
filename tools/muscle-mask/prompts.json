@@ -1,0 +1,23 @@
+{
+  "video": "assets/biceps-source.mov",
+  "muscle": "biceps brachii",
+  "promptFrame": 0,
+  "regions": [
+    {
+      "id": "right-biceps",
+      "label": "Right biceps (viewer's left)",
+      "pose": { "shoulder": 12, "elbow": 14 },
+      "armBox": [540, 250, 760, 660],
+      "positive": [[714, 350], [692, 440], [640, 530]],
+      "negative": [[775, 330], [800, 460], [500, 630]]
+    },
+    {
+      "id": "left-biceps",
+      "label": "Left biceps (viewer's right)",
+      "pose": { "shoulder": 11, "elbow": 13 },
+      "armBox": [840, 250, 975, 670],
+      "positive": [[936, 350], [928, 430], [905, 540]],
+      "negative": [[868, 330], [990, 380], [1000, 640]]
+    }
+  ]
+}

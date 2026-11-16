@@ -1,0 +1,14 @@
+{
+  "name": "parameter-video-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A parameter-driven exercise video editor with simulated Stickies presets and real-time parameter input.",
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "simulate": "node tools/simulate-input.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
