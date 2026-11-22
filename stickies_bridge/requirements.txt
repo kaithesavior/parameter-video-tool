@@ -1,0 +1,5 @@
+numpy>=1.24
+pandas>=2.0
+# Pose extraction for focus (`--pose auto` and the `pose` command). Without these, use --pose none.
+mediapipe>=0.10.14
+opencv-python>=4.8
