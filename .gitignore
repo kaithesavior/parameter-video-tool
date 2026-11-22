@@ -7,11 +7,9 @@ Thumbs.db
 output/
 coverage/
 
-# Keep the bundled example required by the prepared contour track.
-!assets/biceps-source.mov
+# Videos imported in the editor (they can be large).
+videos/
 
-# Muscle mask generator: local Python env, SAM 2 cache and previews.
-.venv/
+# Video-Sticky-Algorithms checkout used by stickies_bridge (npm run setup:stickies).
+vendor/
 __pycache__/
-arm-cache.npz
-mask-preview.jpg

@@ -2,11 +2,16 @@
   "name": "parameter-video-tool",
   "version": "1.0.0",
   "private": true,
-  "description": "A parameter-driven exercise video editor with simulated Stickies presets and real-time parameter input.",
+  "description": "A parameter-driven exercise video editor, driven by cue timelines or live input from the Stickies algorithms.",
   "scripts": {
-    "start": "node server.cjs",
-    "test": "node --test tests/*.test.cjs",
-    "simulate": "node tools/simulate-input.cjs"
+    "start": "node server/server.cjs",
+    "test": "node --test --test-timeout=30000 tests/unit/*.test.cjs",
+    "test:e2e": "node tests/e2e/browser.mjs",
+    "test:bridge": "python3 -m unittest discover -s stickies_bridge/tests -t .",
+    "test:all": "npm test && npm run test:bridge && npm run test:e2e",
+    "setup:stickies": "git clone --depth 1 https://github.com/kaithesavior/Video-Sticky-Algorithms.git vendor/Video-Sticky-Algorithms && python3 -m pip install -r stickies_bridge/requirements.txt",
+    "stickies": "python3 -m stickies_bridge",
+    "format": "npx prettier@3.3.3 --write \"public/**/*.{js,html,css}\" \"server/*.cjs\" \"tests/**/*.{cjs,mjs}\""
   },
   "engines": {
     "node": ">=20"

@@ -5,7 +5,6 @@ const $ = id => document.getElementById(id),
   video = $('video');
 const defaults = { ...PresetModel.base };
 let p = { ...defaults },
-  demo = true,
   playing = false,
   time = 0,
   duration = 8,
@@ -17,7 +16,6 @@ let p = { ...defaults },
   audioDest = null,
   audioNode = null,
   drag = null,
-  selection = null,
   exportEnd = 0,
   exportCancelled = false,
   exportState = null;
@@ -38,12 +36,90 @@ for (const [key, label, min, max, step, stops] of primaryControls) {
   section.innerHTML = `<div class="parameter-heading"><label for="${key}-number">${label}</label><div class="parameter-value"><input id="${key}-number" type="number" data-key="${key}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><span>×</span></div></div><input id="${key}" type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" aria-label="${label} slider"><div class="parameter-stops">${stopButtons}</div>`;
   $('controls').append(section);
 }
+// ----- Control mode ----------------------------------------------------------------------
+// Exactly one source drives speed, zoom and focus:
+//   manual  the View settings in the inspector
+//   cues    the selected cue timeline (presets.js)
+//   live    live input from POST /input or StickiesLive.push (live.js)
+const CONTROL_MODES = new Set(['manual', 'cues', 'live']);
+let controlMode = 'manual';
+function setControlMode(mode, message) {
+  if (!CONTROL_MODES.has(mode)) return;
+  const changed = mode !== controlMode;
+  controlMode = mode;
+  for (const input of document.querySelectorAll('input[name="control-mode"]')) input.checked = input.value === mode;
+  if (changed) {
+    if (typeof cuesModeChanged === 'function') cuesModeChanged(mode);
+    if (typeof liveModeChanged === 'function') liveModeChanged(mode);
+  }
+  paintControl();
+  if (message) setStatus(message);
+}
+// Editing the view while cues or live input drive it hands control back to Manual, so the
+// edit sticks instead of being overwritten on the next frame.
+function takeManualControl() {
+  if (controlMode !== 'manual')
+    setControlMode('manual', `Switched to Manual: your edit replaced ${controlMode === 'cues' ? 'the cues' : 'live input'}.`);
+}
+const CONTROL_HINTS = {
+  manual: 'Speed, zoom and focus come from View below.',
+  cues: 'Playback follows the selected cue timeline. Editing View switches to Manual.',
+  live: 'Speed, zoom and focus follow live input. Editing View switches to Manual.',
+};
+function controlState() {
+  if (controlMode === 'live' && typeof liveStateLabel === 'function') return liveStateLabel(performance.now());
+  if (controlMode === 'cues') return playing ? { label: 'Playing cues', tone: 'is-live' } : { label: 'Cues', tone: '' };
+  return { label: 'Manual', tone: '' };
+}
+function paintControl() {
+  const state = controlState();
+  const badge = $('control-state');
+  if (badge.textContent !== state.label) badge.textContent = state.label;
+  badge.className = 'badge ' + state.tone;
+  $('control-hint').textContent = CONTROL_HINTS[controlMode];
+  $('live-details').hidden = controlMode !== 'live';
+  document.querySelector('.view-panel').classList.toggle('is-driven', controlMode !== 'manual');
+  if (typeof paintCueEditing === 'function') paintCueEditing();
+}
+for (const input of document.querySelectorAll('input[name="control-mode"]'))
+  input.addEventListener('change', () => {
+    if (input.checked) setControlMode(input.value);
+  });
+// The view can be edited unless an export is running or the original is being compared.
+function viewEditable() {
+  return !recording && !$('compare').checked;
+}
 function applyManual(patch) {
   if (recording) return;
-  if (typeof presetManualOverride === 'function') presetManualOverride();
-  if (typeof liveManualOverride === 'function') liveManualOverride();
+  takeManualControl();
   Object.assign(p, patch);
   sync();
+}
+// Rounds down to a number of decimals, for times shown in fields that must not exceed the video.
+function floorTo(value, decimals) {
+  const scale = 10 ** decimals;
+  return (Math.floor(value * scale + 1e-9) / scale).toFixed(decimals);
+}
+function videoAspect() {
+  return video.videoWidth / video.videoHeight || 16 / 9;
+}
+// The video frame letterboxed inside a canvas of the given size.
+function fitFrame(width, height) {
+  const ratio = videoAspect(),
+    frameWidth = Math.min(width, height * ratio),
+    frameHeight = frameWidth / ratio;
+  return {
+    width: frameWidth,
+    height: frameHeight,
+    left: (width - frameWidth) / 2,
+    top: (height - frameHeight) / 2,
+  };
+}
+// Changing playbackRate on every frame causes audio glitches, so only real changes are applied.
+// In Live mode with a followed position, live.js adjusts the rate to stay on it.
+function applyPlaybackRate() {
+  const rate = typeof liveFollowRate === 'function' ? liveFollowRate(p.speed) : p.speed;
+  if (Math.abs(video.playbackRate - rate) > 0.004) video.playbackRate = rate;
 }
 document
   .querySelectorAll('[data-quick-key]')
@@ -53,21 +129,17 @@ document
   );
 $('focus-center').onclick = () => applyManual({ x: 50, y: 50 });
 function editFocus(event) {
-  if (recording || $('compare').checked) return;
+  if (!viewEditable()) return;
   const map = $('focus-map'),
     rect = map.getBoundingClientRect(),
-    ratio = demo ? 16 / 9 : video.videoWidth / video.videoHeight || 16 / 9,
-    fw = Math.min(map.width, map.height * ratio),
-    fh = fw / ratio,
-    ox = (map.width - fw) / 2,
-    oy = (map.height - fh) / 2;
-  const x = ((((event.clientX - rect.left) / rect.width) * map.width - ox) / fw) * 100,
-    y = ((((event.clientY - rect.top) / rect.height) * map.height - oy) / fh) * 100;
+    frame = fitFrame(map.width, map.height);
+  const x = ((((event.clientX - rect.left) / rect.width) * map.width - frame.left) / frame.width) * 100,
+    y = ((((event.clientY - rect.top) / rect.height) * map.height - frame.top) / frame.height) * 100;
   applyManual({ x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) });
 }
 let focusDragging = false;
 $('focus-map').onpointerdown = event => {
-  if (recording || $('compare').checked) return;
+  if (!viewEditable()) return;
   focusDragging = true;
   $('focus-map').setPointerCapture(event.pointerId);
   editFocus(event);
@@ -123,8 +195,7 @@ function paintMetrics() {
 }
 function viewMode(raw) {
   if (raw) return 'Original';
-  if (typeof attachedPreset !== 'undefined' && attachedPreset) return 'Preset';
-  return 'Manual';
+  return { manual: 'Manual', cues: 'Cues', live: 'Live' }[controlMode];
 }
 function sync() {
   document.querySelectorAll('[data-key]').forEach(el => {
@@ -140,20 +211,41 @@ function sync() {
         String(Math.abs(p[button.dataset.quickKey] - Number(button.dataset.quickValue)) < 0.001),
       ),
     );
-  video.playbackRate = p.speed;
-  if (typeof paintSimulation === 'function' && !attachedPreset) paintSimulation(null);
+  applyPlaybackRate();
+  // Manual values belong to the open video and are saved with it.
+  if (controlMode === 'manual' && typeof saveVideoState === 'function') saveVideoState();
 }
 document.querySelectorAll('[data-key]').forEach(el =>
   el.addEventListener('input', () => {
     const key = el.dataset.key;
-    if (el.type === 'checkbox') p[key] = el.checked;
-    else {
-      if (el.value === '' || !Number.isFinite(el.valueAsNumber)) return;
-      p[key] = Math.min(+el.max, Math.max(+el.min, el.valueAsNumber));
-    }
+    if (el.type !== 'checkbox' && (el.value === '' || !Number.isFinite(el.valueAsNumber))) return;
+    takeManualControl();
+    p[key] = el.type === 'checkbox' ? el.checked : Math.min(+el.max, Math.max(+el.min, el.valueAsNumber));
     sync();
   }),
 );
+// The zoom animation must end after it starts. Checked when an edit is committed (change),
+// not on every keystroke, so typing "12" into End does not trip over the intermediate "1".
+const ANIMATION_GAP = 1,
+  ANIMATION_MAX = 36000;
+function keepAnimationOrdered(changed) {
+  if (p.end > p.start) return;
+  if (changed === 'start') {
+    p.end = Math.min(ANIMATION_MAX, p.start + ANIMATION_GAP);
+    if (p.end <= p.start) p.start = p.end - ANIMATION_GAP;
+  } else {
+    p.start = Math.max(0, p.end - ANIMATION_GAP);
+  }
+  sync();
+  setStatus(
+    `Zoom animation must end after it starts, so ${changed === 'start' ? 'End' : 'Start'} was moved to ${(changed === 'start' ? p.end : p.start).toFixed(1)} s.`,
+    'warn',
+  );
+}
+for (const key of ['start', 'end'])
+  document
+    .querySelector(`[data-key="${key}"]`)
+    .addEventListener('change', () => keepAnimationOrdered(key));
 function setStatus(message, tone) {
   $('status').textContent = message;
   document.querySelector('.status-dot').dataset.tone =
@@ -172,18 +264,10 @@ document.addEventListener('visibilitychange', () => {
       'warn',
     );
 });
-function fmt(t) {
-  return `${Math.floor(t / 60)
-    .toString()
-    .padStart(2, '0')}:${Math.floor(t % 60)
-    .toString()
-    .padStart(2, '0')}`;
-}
 function setSize() {
-  const w = +$('resolution').value,
-    ratio = demo ? 16 / 9 : video.videoWidth / video.videoHeight;
-  canvas.width = w;
-  canvas.height = Math.round(w / ratio);
+  const width = +$('resolution').value;
+  canvas.width = width;
+  canvas.height = Math.round(width / videoAspect());
 }
 function zoomAt(t) {
   if (!p.animate) return p.zoom;
@@ -202,98 +286,28 @@ function geometry() {
     ty: Math.min(0, Math.max(h - h * z, h / 2 - (p.y / 100) * h * z)),
   };
 }
-function demoDraw(t, w, h) {
-  ctx.fillStyle = '#1c282b';
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = '#344246';
-  ctx.lineWidth = 1;
-  for (let i = 0; i < w; i += w / 16) {
-    ctx.beginPath();
-    ctx.moveTo(i, 0);
-    ctx.lineTo(i, h);
-    ctx.stroke();
-  }
-  for (let i = 0; i < h; i += h / 9) {
-    ctx.beginPath();
-    ctx.moveTo(0, i);
-    ctx.lineTo(w, i);
-    ctx.stroke();
-  }
-  ctx.fillStyle = '#c0baa8';
-  ctx.fillRect(w * 0.12, h * 0.19, w * 0.76, h * 0.62);
-  ctx.fillStyle = '#e5dfd0';
-  ctx.fillRect(w * 0.15, h * 0.23, w * 0.7, h * 0.54);
-  ctx.fillStyle = '#263a3b';
-  ctx.fillRect(w * 0.19, h * 0.29, w * 0.29, h * 0.38);
-  ctx.fillStyle = '#badc91';
-  ctx.beginPath();
-  ctx.arc(w * 0.335, h * 0.48, h * 0.13, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#597a43';
-  ctx.beginPath();
-  ctx.arc(
-    w * (0.335 + 0.045 * Math.sin(t * 1.2)),
-    h * (0.48 + 0.025 * Math.cos(t)),
-    h * 0.055,
-    0,
-    Math.PI * 2,
-  );
-  ctx.fill();
-  ctx.fillStyle = '#47574b';
-  ctx.font = `600 ${w * 0.022}px sans-serif`;
-  ctx.fillText('FORM / 028', w * 0.53, h * 0.36);
-  ctx.font = `${w * 0.012}px sans-serif`;
-  ctx.fillText('A study in light, form and motion.', w * 0.53, h * 0.42);
-  ctx.fillStyle = '#a3aa96';
-  for (let i = 0; i < 3; i++)
-    ctx.fillRect(w * 0.53, h * (0.49 + i * 0.05), w * (0.22 - i * 0.025), h * 0.009);
-  ctx.fillStyle = '#263a3b';
-  ctx.fillRect(w * 0.53, h * 0.66, w * 0.13, h * 0.045);
-  ctx.fillStyle = '#e5dfd0';
-  ctx.font = `${w * 0.009}px sans-serif`;
-  ctx.fillText('EXPLORE OBJECT', w * 0.542, h * 0.69);
-}
 function draw() {
-  if (!demo && video.seeking) return;
-  const g = geometry(),
-    { z, w, h, tx, ty } = g;
+  if (video.seeking) return;
+  const { z, w, h, tx, ty } = geometry();
   ctx.resetTransform();
   ctx.clearRect(0, 0, w, h);
   ctx.save();
   ctx.translate(tx, ty);
   ctx.scale(z, z);
-  if (demo) demoDraw(time, w, h);
-  else if (video.readyState >= 2) ctx.drawImage(video, 0, 0, w, h);
-  if (typeof drawMuscleHighlight === 'function') drawMuscleHighlight(ctx, w, h);
+  if (video.readyState >= 2) ctx.drawImage(video, 0, 0, w, h);
   ctx.restore();
 }
-// Moves the playhead: the demo clip runs on its own clock, real videos report theirs.
-function advanceClock(dt) {
-  if (!demo) {
-    time = video.currentTime;
-  } else if (playing) {
-    time += dt * p.speed;
-    if (time >= duration) {
-      time = duration;
-      if (recording) {
-        finishExport();
-      } else {
-        playing = false;
-        updatePlay();
-      }
-    }
-  }
+// The video element owns the clock; the end of the clip is handled by video.onended.
+function advanceClock() {
+  time = video.currentTime;
   if (recording && time >= exportEnd) finishExport();
 }
 function renderFrame(dtMs) {
   if (typeof presetFrame === 'function') presetFrame(time);
   if (typeof liveFrame === 'function') liveFrame(dtMs);
-  if (typeof muscleFrame === 'function') muscleFrame(dtMs);
   draw();
   paintMetrics();
   if (typeof updateTimelineCursor === 'function') updateTimelineCursor();
-  $('clock').value = `${fmt(time)} / ${fmt(duration)}`;
-  $('seek').value = time;
 }
 // Render loop. The next frame is scheduled first and each frame is guarded, so one bad
 // frame (decoder hiccup, bad input) is reported instead of freezing the editor.
@@ -304,7 +318,7 @@ function tick(now) {
     if (!last) last = now;
     const dtMs = Math.min(250, now - last);
     last = now;
-    advanceClock(dtMs / 1000);
+    advanceClock();
     renderFrame(dtMs);
     frameErrors = 0;
   } catch (error) {
@@ -317,17 +331,20 @@ function tick(now) {
 }
 requestAnimationFrame(tick);
 function updatePlay() {
-  const b = $('play'),
+  const button = $('play'),
     label = playing ? 'Pause' : 'Play';
-  b.dataset.state = playing ? 'playing' : 'paused';
-  b.setAttribute('aria-label', label);
-  b.title = label + ' (Space)';
+  button.dataset.state = playing ? 'playing' : 'paused';
+  button.setAttribute('aria-label', label);
+  button.title = label + ' (Space)';
+  paintControl();
 }
 async function play() {
+  if (!videoOpen()) throw new Error('Cannot play: no video is open. Import a video first.');
+  // Live mode follows live input; without any for this video there is nothing to play to.
+  const liveProblem = controlMode === 'live' && typeof liveBlocker === 'function' ? liveBlocker() : '';
+  if (liveProblem) throw new Error(liveProblem);
   if (time >= duration - 0.02) await seekTo(0);
-  if (!demo) {
-    await video.play();
-  }
+  await video.play();
   playing = true;
   updatePlay();
 }
@@ -338,7 +355,7 @@ function pause() {
 }
 async function seekTo(t) {
   time = Math.min(duration, Math.max(0, t));
-  if (!demo && Math.abs(video.currentTime - time) > 0.001)
+  if (Math.abs(video.currentTime - time) > 0.001)
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
@@ -366,9 +383,9 @@ async function seekTo(t) {
 }
 $('play').onclick = () => {
   if (playing) pause();
-  else play().catch(e => setStatus(e.message));
+  else play().catch(error => setStatus(error.message));
 };
-$('to-start').onclick = () => seekTo(0).catch(e => setStatus(e.message));
+$('to-start').onclick = () => seekTo(0).catch(error => setStatus(error.message));
 document.addEventListener('keydown', e => {
   if (
     e.code !== 'Space' ||
@@ -382,29 +399,38 @@ document.addEventListener('keydown', e => {
   e.preventDefault();
   $('play').click();
 });
-$('seek').oninput = () => {
-  time = +$('seek').value;
-  if (!demo) video.currentTime = time;
-};
 function loaded() {
-  duration = demo ? 8 : video.duration;
+  duration = video.duration;
   time = 0;
-  $('seek').max = duration;
   $('in').value = 0;
-  $('out').value = duration.toFixed(2);
+  // Rounded down: rounding up (e.g. 10.0167 → 10.02) would put the default end past the
+  // video and block the export.
+  $('out').value = floorTo(duration, 2);
   setSize();
   updatePlay();
-  if (typeof presetsMediaChanged === 'function') presetsMediaChanged();
+  $('viewer-empty').hidden = true;
+  // Each video has its own parameters, cue timelines and export range (presets.js).
+  if (typeof applyVideoState === 'function') applyVideoState();
 }
-function prepareSource(label) {
+// Name of the loaded video (the file name for imported files) and its video library id
+// ('file:<name>' for the videos folder, 'session-…' for session-only videos, null for others).
+let sourceName = '',
+  currentVideoId = null,
+  startupNotice = '';
+function prepareSource(label, id = null) {
   pause();
-  if (typeof stopPreset === 'function') stopPreset(false);
+  // Save the outgoing video's state before anything about the new one is set.
+  if (typeof flushVideoState === 'function') flushVideoState();
   sourceGeneration++;
+  sourceName = label;
+  currentVideoId = id;
+  // Live values belong to the video they were sent for (live.js).
+  if (typeof liveVideoChanged === 'function') liveVideoChanged();
+  if (typeof paintVideoLibrary === 'function') paintVideoLibrary();
   if (objectURL) {
     URL.revokeObjectURL(objectURL);
     objectURL = null;
   }
-  demo = false;
   video.onloadedmetadata = () => {
     if (!Number.isFinite(video.duration) || !video.videoWidth) {
       setStatus('Unsupported video. Please use MP4 or WebM.');
@@ -412,41 +438,96 @@ function prepareSource(label) {
     }
     loaded();
     $('source').textContent = label + ' · ' + video.videoWidth + ' × ' + video.videoHeight;
-    setStatus('Video ready.');
+    // A start-up warning (e.g. damaged saved presets) is shown instead of "Video ready."
+    // so it is not replaced before anyone can read it.
+    if (startupNotice) setStatus(startupNotice, 'warn');
+    else setStatus('Video ready.');
+    startupNotice = '';
   };
   video.onerror = () => {
     setStatus('Cannot decode this video. Use a browser-compatible MP4 (H.264) or WebM file.');
   };
   return sourceGeneration;
 }
-function loadFile(file) {
-  if (!file) return;
-  prepareSource(file.name);
+// Resolves once the video's metadata (duration, size) is known; rejects if it cannot be used.
+// Listeners are added after the onloadedmetadata handler, so `duration` is already updated.
+function videoReady(label) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', ready);
+      video.removeEventListener('error', failed);
+    };
+    const ready = () => {
+      cleanup();
+      if (Number.isFinite(video.duration) && video.videoWidth) resolve();
+      else reject(new Error(`"${label}" is not a supported video. Please use MP4 or WebM.`));
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error(`Could not load the video "${label}".`));
+    };
+    video.addEventListener('loadedmetadata', ready);
+    video.addEventListener('error', failed);
+  });
+}
+function loadFile(file, label = file?.name, id = null) {
+  if (!file) return Promise.resolve();
+  prepareSource(label, id);
+  const ready = videoReady(label);
   objectURL = URL.createObjectURL(file);
   video.src = objectURL;
+  return ready;
 }
-function loadExample() {
-  prepareSource('Exercise example');
-  video.src = 'assets/biceps-source.mov';
+// Loads a video the server provides (a path such as videos/clip.mp4) or a full URL.
+// The library id for a served path: a video in the videos folder, or none.
+function videoIdForUrl(url) {
+  const match = /^videos\/([^/]+)$/.exec(url);
+  return match ? 'file:' + decodeURIComponent(match[1]) : null;
 }
-$('open').onclick = () => $('file').click();
-$('file').onchange = () => {
-  loadFile($('file').files[0]);
-  $('file').value = '';
-};
-$('demo').onclick = loadExample;
+function loadVideoUrl(url, label = url, id = videoIdForUrl(url)) {
+  prepareSource(label, id);
+  const ready = videoReady(label);
+  video.src = url;
+  return ready;
+}
+// Whether a video is open. Browsers keep the old currentSrc after a video is unloaded, so the
+// src attribute is what tells.
+function videoOpen() {
+  return video.hasAttribute('src');
+}
+// No video open: the library is empty, or the open video was removed. The viewer says so,
+// and View and the cue timelines return to their empty state.
+function unloadVideo() {
+  prepareSource('', null);
+  video.onloadedmetadata = video.onerror = null;
+  video.removeAttribute('src');
+  video.load();
+  time = 0;
+  $('source').textContent = 'No video';
+  $('viewer-empty').hidden = false;
+  if (typeof applyVideoState === 'function') applyVideoState();
+  draw();
+}
+// How a preset file refers to the current video: the file name of an imported file,
+// otherwise its path on this server (e.g. videos/clip.mp4) or its full URL.
+function currentVideoRef() {
+  if (objectURL) return sourceName;
+  if (!videoOpen() || !video.currentSrc) return '';
+  const url = new URL(video.currentSrc);
+  return url.origin === location.origin ? decodeURIComponent(url.pathname.slice(1)) : url.href;
+}
+// Import video and the video library live in library.js.
 
 $('resolution').onchange = setSize;
 video.onended = () => {
   pause();
   if (recording) finishExport();
 };
-video.onerror = () => setStatus('Could not read the video.');
-function pointer(e) {
+function pointer(event) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: ((e.clientX - rect.left) / rect.width) * canvas.width,
-    y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((event.clientY - rect.top) / rect.height) * canvas.height,
   };
 }
 function sourcePoint(q, g) {
@@ -455,14 +536,16 @@ function sourcePoint(q, g) {
     y: Math.min(100, Math.max(0, ((q.y - g.ty) / g.z / g.h) * 100)),
   };
 }
-canvas.onpointerdown = e => {
-  if (recording || $('compare').checked) return;
-  drag = { point: pointer(e), g: geometry() };
-  canvas.setPointerCapture(e.pointerId);
+canvas.onpointerdown = event => {
+  if (!viewEditable()) return;
+  takeManualControl();
+  // The focus is set where the pointer is released, using the view at the time of the press.
+  drag = { g: geometry() };
+  canvas.setPointerCapture(event.pointerId);
 };
-canvas.onpointerup = e => {
+canvas.onpointerup = event => {
   if (!drag) return;
-  const point = sourcePoint(pointer(e), drag.g);
+  const point = sourcePoint(pointer(event), drag.g);
   p.x = point.x;
   p.y = point.y;
   drag = null;
@@ -473,6 +556,7 @@ canvas.onpointercancel = () => {
 };
 
 $('reset').onclick = () => {
+  takeManualControl();
   p = { ...defaults };
   $('compare').checked = false;
   sync();
@@ -485,37 +569,26 @@ function download(blob, name) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-$('save').onclick = () =>
-  download(
-    new Blob([JSON.stringify({ version: 1, parameters: p }, null, 2)], { type: 'application/json' }),
-    'focus-parameters.json',
-  );
-$('load').onclick = () => $('recipe').click();
-$('recipe').onchange = async () => {
-  try {
-    const f = $('recipe').files[0];
-    if (!f) return;
-    const data = JSON.parse(await f.text());
-    if (data.version !== 1 || !data.parameters || typeof data.parameters !== 'object')
-      throw new Error('Invalid parameter format');
-    const next = PresetModel.parameters(data.parameters);
-    p = next;
-    sync();
-    setStatus('Parameters imported.');
-  } catch (e) {
-    setStatus('Import failed: ' + e.message);
-  } finally {
-    $('recipe').value = '';
-  }
-};
+// Applies a parameters file: {version: 1, parameters: {speed, zoom, x, y, …}}.
+function importParameters(data) {
+  if (data?.version !== 1 || !data.parameters || typeof data.parameters !== 'object')
+    throw new Error('Unknown JSON format. Expected a preset ("kind": "stickies-preset") or parameters.');
+  const next = PresetModel.parameters(data.parameters);
+  takeManualControl();
+  p = next;
+  sync();
+  setStatus('Parameters imported.');
+}
+const EXPORT_BUTTON_HTML = $('export').innerHTML;
 function lock(yes) {
   document.querySelectorAll('button,input,select').forEach(el => (el.disabled = yes));
   $('export').disabled = false;
-  $('export').textContent = yes ? 'Cancel export' : 'Export video';
-  if (!yes && typeof paintPreset === 'function') {
-    paintPreset();
-    paintSimulation(attachedPreset ? PresetModel.sample(attachedPreset, time, duration) : null);
-  }
+  if (yes) $('export').textContent = 'Cancel export';
+  else $('export').innerHTML = EXPORT_BUTTON_HTML;
+  if (yes) return;
+  if (typeof paintVideoLibrary === 'function') paintVideoLibrary();
+  if (typeof paintPreset === 'function') paintPreset();
+  paintControl();
 }
 function finishExport(cancel = false) {
   if (!recording) return;
@@ -526,17 +599,17 @@ function finishExport(cancel = false) {
 }
 // Returns a reason the export cannot start, or an empty string when it can.
 function exportBlocker(from, to) {
+  if (!videoOpen()) return 'Cannot export: no video is open. Import a video first.';
   if (!window.MediaRecorder || !canvas.captureStream)
     return 'Video export is unavailable. Please use a recent version of Chrome or Edge.';
   if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from || to > duration + 0.001)
     return 'Enter a valid export range: 0 ≤ start < end ≤ video duration.';
-  if (!demo && video.readyState < 2) return 'Please wait for the video to finish loading.';
+  if (video.readyState < 2) return 'Please wait for the video to finish loading.';
   if (p.animate && p.end <= p.start) return 'Zoom animation end time must be after its start time.';
   return '';
 }
 // The media element can only be attached to one audio graph, so it is built once.
 async function ensureAudioGraph() {
-  if (demo) return;
   if (!audioCtx) {
     audioCtx = new AudioContext();
     audioNode = audioCtx.createMediaElementSource(video);
@@ -605,7 +678,7 @@ async function startExport() {
     if (typeof presetFrame === 'function') presetFrame(from);
     draw();
     stream = canvas.captureStream(30);
-    if (!demo) for (const track of audioDest.stream.getAudioTracks()) stream.addTrack(track.clone());
+    for (const track of audioDest.stream.getAudioTracks()) stream.addTrack(track.clone());
     const mime = pickExportMime();
     exportEnd = to;
     startRecorder(stream, mime);
@@ -623,9 +696,36 @@ async function startExport() {
     setStatus('Export failed: ' + error.message);
   }
 }
+// ----- Export dialog ----------------------------------------------------------------------
+// One place for every output of the open video: the edited video, its cue timeline (CSV or
+// JSON) and the current view parameters. While a video export runs, the toolbar button cancels it.
+function openExportDialog() {
+  $('export-video-name').textContent = sourceName;
+  const timeline = typeof selectedPreset === 'function' ? selectedPreset() : null;
+  $('export-timeline-name').textContent = timeline ? timeline.name : 'none selected';
+  $('export-csv').disabled = $('export-json').disabled = !timeline;
+  $('export-dialog').showModal();
+}
 $('export').onclick = () => {
   if (recording) finishExport(true);
-  else void startExport();
+  else openExportDialog();
 };
+$('export-start').onclick = () => {
+  $('export-dialog').close();
+  void startExport();
+};
+$('export-params').onclick = () => {
+  download(
+    new Blob([JSON.stringify({ version: 1, parameters: p }, null, 2)], { type: 'application/json' }),
+    'view-parameters.json',
+  );
+  setStatus('View parameters exported. Import restores them.');
+};
+// The export range belongs to the open video.
+for (const id of ['in', 'out'])
+  $(id).addEventListener('change', () => {
+    if (typeof saveVideoState === 'function') saveVideoState();
+  });
 sync();
-loadExample();
+paintControl();
+// library.js opens the first video (the last one watched, or the first in the library).
