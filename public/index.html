@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Stickies — Instruction Editor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-import" viewBox="0 0 16 16">
+          <path d="M8 10V2.5M5 5.5l3-3 3 3M2.5 10v2.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V10" />
+        </symbol>
+        <symbol id="i-open" viewBox="0 0 16 16">
+          <path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
+        </symbol>
+        <symbol id="i-save" viewBox="0 0 16 16">
+          <path
+            d="M3 2.5h8l2.5 2.5v8a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5zM5 2.5v3h5v-3M5 13.5V9.5h6v4"
+          />
+        </symbol>
+        <symbol id="i-export" viewBox="0 0 16 16">
+          <path d="M8 2.5V10M5 7l3 3 3-3M2.5 10v2.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V10" />
+        </symbol>
+        <symbol id="i-play" viewBox="0 0 16 16">
+          <path
+            d="M5 3.2v9.6a.4.4 0 0 0 .6.35l7.7-4.8a.4.4 0 0 0 0-.7L5.6 2.85a.4.4 0 0 0-.6.35z"
+            fill="currentColor"
+            stroke="none"
+          />
+        </symbol>
+        <symbol id="i-pause" viewBox="0 0 16 16">
+          <rect x="4" y="3" width="2.6" height="10" rx=".5" fill="currentColor" stroke="none" />
+          <rect x="9.4" y="3" width="2.6" height="10" rx=".5" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-start" viewBox="0 0 16 16">
+          <path d="M4 3v10" />
+          <path
+            d="M12.5 3.4v9.2a.4.4 0 0 1-.62.33L5.6 8.33a.4.4 0 0 1 0-.66l6.28-4.6a.4.4 0 0 1 .62.33z"
+            fill="currentColor"
+            stroke="none"
+          />
+        </symbol>
+        <symbol id="i-reset" viewBox="0 0 16 16">
+          <path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.75M2.5 2.5v2.8h2.8" />
+        </symbol>
+        <symbol id="i-stop" viewBox="0 0 16 16">
+          <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-target" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="4.5" />
+          <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+        </symbol>
+        <symbol id="i-expand" viewBox="0 0 16 16">
+          <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" />
+        </symbol>
+        <symbol id="i-sidebar" viewBox="0 0 16 16">
+          <rect x="2" y="3" width="12" height="10" rx="1.5" />
+          <path d="M6 3v10" />
+        </symbol>
+        <symbol id="i-file" viewBox="0 0 16 16">
+          <path
+            d="M4 1.5h5.5L12.5 4.5v9.5a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5zM9.5 1.5v3h3"
+          />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header class="appbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span><strong>Stickies</strong><span class="crumb">/</span
+        ><span class="doc">Instruction Editor</span>
+      </div>
+      <nav class="toolbar" aria-label="Project tools">
+        <button
+          id="open"
+          class="ghost"
+          title="Import videos, or a cue timeline / parameters JSON (select its video too to open both)"
+        >
+          <svg class="i"><use href="#i-import" /></svg>Import
+        </button>
+      </nav>
+      <button id="export" class="primary" aria-haspopup="dialog">
+        <svg class="i"><use href="#i-export" /></svg>Export
+      </button>
+      <input
+        id="file"
+        type="file"
+        accept="video/*,.json,application/json"
+        aria-label="Videos or a JSON file"
+        multiple
+        hidden
+      />
+    </header>
+
+    <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title">
+      <form method="dialog">
+        <div class="dialog-head">
+          <h2 id="export-title">Export</h2>
+          <span id="export-video-name" class="pane-meta"></span>
+          <button class="icon ghost sm" value="close" aria-label="Close">×</button>
+        </div>
+        <section class="dialog-section">
+          <h3>Video</h3>
+          <p class="hint">Records the edited view with sound, in real time. Keep the page visible.</p>
+          <label class="field"
+            >Resolution<select id="resolution">
+              <option value="1280">1280 × 720 · 720p</option>
+              <option value="1920">1920 × 1080 · 1080p</option>
+              <option value="640">640 × 360 · 360p</option>
+            </select></label
+          >
+          <div class="field">
+            <span>Range</span>
+            <div class="pair">
+              <span class="input-unit"
+                ><input id="in" type="number" aria-label="Export start" min="0" step="0.1" value="0" /><span
+                  >s</span
+                ></span
+              ><span class="dash">–</span
+              ><span class="input-unit"
+                ><input id="out" type="number" aria-label="Export end" min="0.1" step="0.1" value="8" /><span
+                  >s</span
+                ></span
+              >
+            </div>
+          </div>
+          <button id="export-start" type="button" class="primary">Export video</button>
+        </section>
+        <section class="dialog-section">
+          <h3>Cue timeline <span id="export-timeline-name" class="pane-meta"></span></h3>
+          <p class="hint">CSV samples the timeline every 0.1 s. JSON can be imported again.</p>
+          <div class="btn-row">
+            <button id="export-csv" type="button">Download CSV</button
+            ><button id="export-json" type="button">Download JSON</button>
+          </div>
+        </section>
+        <section class="dialog-section">
+          <h3>View parameters</h3>
+          <p class="hint">The current speed, zoom, focus and zoom animation as JSON.</p>
+          <div class="btn-row">
+            <button id="export-params" type="button">Download JSON</button>
+          </div>
+        </section>
+      </form>
+    </dialog>
+
+    <main>
+      <nav class="library" aria-label="Video library">
+        <div class="pane-header">
+          <span class="pane-title">Videos</span><span id="library-count" class="pane-meta"></span>
+          <div class="pane-actions">
+            <button id="library-add" class="icon ghost sm" title="Import videos" aria-label="Import videos">
+              <svg class="i"><use href="#i-import" /></svg></button
+            ><button id="library-clear" class="ghost sm" title="Remove all imported videos">Clear</button>
+          </div>
+        </div>
+        <ul id="library-list" class="library-list"></ul>
+        <p id="library-warning" class="library-warning" role="alert" hidden></p>
+        <p id="library-empty" class="hint library-hint">
+          No videos yet. Import one, or copy videos into the project's videos/ folder and reload. Nothing is
+          uploaded.
+        </p>
+      </nav>
+      <section class="workspace">
+        <div class="pane-header viewer-bar">
+          <button
+            id="library-toggle"
+            class="icon ghost sm"
+            aria-expanded="true"
+            aria-controls="library-list"
+            title="Hide video library"
+          >
+            <svg class="i"><use href="#i-sidebar" /></svg>
+          </button>
+          <span class="pane-title">Viewer</span>
+          <span id="source" class="pane-meta">No video</span>
+          <div class="pane-actions">
+            <label class="switch-label" title="Compare against the unprocessed source"
+              ><input id="compare" type="checkbox" class="switch" /> Original</label
+            >
+          </div>
+        </div>
+        <div class="stage">
+          <div class="preview">
+            <canvas
+              id="canvas"
+              width="1280"
+              height="720"
+              aria-label="Video preview. Click to set zoom focus."
+            ></canvas>
+          </div>
+          <div id="viewer-empty" class="viewer-empty" hidden>
+            <p class="viewer-empty-title">No video open</p>
+            <p class="viewer-empty-text">Import a video, or pick one from the library.</p>
+            <button id="viewer-import" type="button" class="ghost">Import video</button>
+          </div>
+        </div>
+        <div class="transport timeline" aria-label="Playback">
+          <div class="transport-left">
+            <output id="live-time" class="timecode">0.00 s</output>
+            <small id="live-play-state" class="play-state">Paused</small>
+          </div>
+          <div class="transport-center">
+            <button id="to-start" class="icon ghost" title="Go to start" aria-label="Go to start">
+              <svg class="i"><use href="#i-start" /></svg>
+            </button>
+            <button id="play" class="icon play" data-state="paused" aria-label="Play" title="Play (Space)">
+              <svg class="i i-play"><use href="#i-play" /></svg
+              ><svg class="i i-pause"><use href="#i-pause" /></svg>
+            </button>
+          </div>
+          <div class="transport-right">
+            <div class="readout"><span>Speed</span><strong id="live-speed">1.00×</strong></div>
+            <div class="readout"><span>Zoom</span><strong id="live-zoom">1.00×</strong></div>
+            <div class="readout readout-event">
+              <span id="live-input-mode" class="badge">Manual</span><strong id="live-event">—</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside aria-label="Inspector">
+        <div class="pane-header"><span class="pane-title">Inspector</span></div>
+
+        <section class="section control-panel" aria-label="Control source">
+          <div class="section-head">
+            <span>Control</span><output id="control-state" class="badge">Manual</output>
+          </div>
+          <div class="segmented" role="radiogroup" aria-label="What drives speed, zoom and focus">
+            <label title="Speed, zoom and focus come from the View settings below"
+              ><input type="radio" name="control-mode" value="manual" checked /><span>Manual</span></label
+            ><label title="Speed, zoom and focus follow the selected cue timeline"
+              ><input type="radio" name="control-mode" value="cues" /><span>Cues</span></label
+            ><label title="Speed, zoom and focus follow live input (POST /input)"
+              ><input type="radio" name="control-mode" value="live" /><span>Live</span></label
+            >
+          </div>
+          <p id="control-hint" class="hint control-hint"></p>
+          <div id="live-details" class="live-details" hidden>
+            <dl class="live-stats">
+              <div>
+                <dt>Rate</dt>
+                <dd id="live-rate">—</dd>
+              </div>
+              <div>
+                <dt>Last message</dt>
+                <dd id="live-last">—</dd>
+              </div>
+              <div>
+                <dt>Rejected</dt>
+                <dd id="live-dropped">0</dd>
+              </div>
+              <div class="live-source">
+                <dt>Source</dt>
+                <dd id="live-source" title="What produces the live values, as the sender names it">—</dd>
+              </div>
+              <div>
+                <dt>Following</dt>
+                <dd id="live-follow" title="Video time minus the position sent as time">—</dd>
+              </div>
+            </dl>
+            <small class="hint live-hint"
+              >Send JSON to <code>POST /input</code>. Try <code>npm run stickies -- live</code>.</small
+            >
+          </div>
+        </section>
+
+        <section class="section view-panel" aria-label="View">
+          <div class="section-head">
+            <span>View</span
+            ><button id="reset" class="icon ghost sm" title="Reset speed, zoom and focus" aria-label="Reset view">
+              <svg class="i"><use href="#i-reset" /></svg>
+            </button>
+          </div>
+          <div id="controls"></div>
+          <div class="subhead">
+            <span>Focus</span
+            ><button
+              id="focus-center"
+              class="icon ghost sm"
+              title="Center the zoom focus"
+              aria-label="Center the zoom focus"
+            >
+              <svg class="i"><use href="#i-target" /></svg>
+            </button>
+          </div>
+          <canvas
+            id="focus-map"
+            width="256"
+            height="144"
+            title="Drag to position the zoom focus"
+            aria-label="Drag to position the zoom focus; alternatively use X and Y fields"
+          ></canvas>
+          <div class="focus-coordinates">
+            <label
+              ><span class="axis">X</span
+              ><span class="input-unit"
+                ><input type="number" data-key="x" min="0" max="100" step=".1" aria-label="Focus X" /><span
+                  >%</span
+                ></span
+              ></label
+            >
+            <label
+              ><span class="axis">Y</span
+              ><span class="input-unit"
+                ><input type="number" data-key="y" min="0" max="100" step=".1" aria-label="Focus Y" /><span
+                  >%</span
+                ></span
+              ></label
+            >
+          </div>
+          <p id="focus-caption" class="sr-only">Full frame</p>
+          <details class="inline-details animation-panel">
+            <summary>Zoom animation</summary>
+            <label class="row-toggle"
+              >Enabled<input
+                type="checkbox"
+                class="switch"
+                data-key="animate"
+                aria-label="Enable zoom animation"
+            /></label>
+            <div class="grid-2">
+              <label class="field"
+                >Start<span class="input-unit"
+                  ><input
+                    data-key="start"
+                    type="number"
+                    min="0"
+                    max="36000"
+                    step=".1"
+                    aria-label="Animation start"
+                  /><span>s</span></span
+                ></label
+              >
+              <label class="field"
+                >End<span class="input-unit"
+                  ><input
+                    data-key="end"
+                    type="number"
+                    min=".1"
+                    max="36000"
+                    step=".1"
+                    aria-label="Animation end"
+                  /><span>s</span></span
+                ></label
+              >
+            </div>
+          </details>
+        </section>
+
+        <section class="section cues-panel" aria-label="Cue timelines">
+          <div class="section-head">
+            <span>Cue timelines</span><span id="preset-kind" class="pane-meta"></span>
+          </div>
+          <label class="sr-only" for="preset-select">Cue timeline</label>
+          <select id="preset-select"></select>
+          <div class="btn-row timeline-actions">
+            <button id="preset-new" class="sm ghost" title="New timeline from the current view">New</button
+            ><button id="preset-duplicate" class="sm ghost">Duplicate</button
+            ><button id="preset-delete" class="sm ghost danger">Delete</button>
+          </div>
+          <p id="cues-empty" class="hint cues-empty">
+            No cue timeline for this video, so nothing is applied: View settings or live input drive the
+            playback. <strong>Import</strong> a timeline JSON, click <strong>New</strong> to build one, or pick a
+            template above.
+          </p>
+          <div id="cues-editor" hidden>
+          <div class="field">
+            <label for="preset-name">Name</label><input type="text" id="preset-name" maxlength="80" />
+          </div>
+          <div class="cue-list" id="cue-list" aria-label="Cues"></div>
+          <div class="cue-form">
+            <div class="field">
+              <label for="cue-time">Time</label>
+              <div class="time-entry">
+                <span class="input-unit"
+                  ><input id="cue-time" type="number" min="0" step="0.01" value="0" /><span>s</span></span
+                ><button id="cue-now" class="sm" title="Use current playhead time">Playhead</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="cue-label">Label</label><input id="cue-label" type="text" maxlength="80" />
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="cue-add" class="sm" title="Add a cue with the current View values">Add cue</button
+            ><button id="cue-save" class="sm" title="Save the current View values into the selected cue">
+              Update</button
+            ><button id="cue-remove" class="sm danger">Remove</button>
+          </div>
+          <small id="cue-hint" class="hint cue-hint"></small>
+          </div>
+        </section>
+
+        <details class="section collapsible metrics-panel inspector-metrics">
+          <summary>Live values <span id="metrics-mode" class="badge">Manual</span></summary>
+          <dl id="live-metrics"></dl>
+        </details>
+      </aside>
+
+      <section class="schedule-panel" aria-label="Complete preset parameter schedule">
+        <div class="pane-header schedule-heading">
+          <span class="pane-title">Timeline</span>
+          <span id="schedule-name" class="pane-meta"></span>
+          <span id="schedule-mode" class="badge">Inactive</span>
+          <div class="pane-actions schedule-actions">
+            <output id="schedule-time" class="timecode-sm">0.00 s</output>
+            <span class="tb-sep" aria-hidden="true"></span>
+            <button id="schedule-expand" class="ghost sm" aria-expanded="false">Expand timeline</button>
+          </div>
+        </div>
+        <section class="schedule-scroll" aria-label="Preset plan">
+          <div class="chart-wrap">
+            <input
+              id="schedule-seek"
+              type="range"
+              min="0"
+              max="8"
+              step="0.01"
+              value="0"
+              aria-label="Playback position"
+            />
+            <svg
+              id="schedule-chart"
+              viewBox="0 0 1000 246"
+              role="img"
+              aria-label="Parameter curves across source time"
+            ></svg>
+          </div>
+          <details class="exact-values">
+            <summary>Cue values</summary>
+            <table id="parameter-schedule">
+              <thead>
+                <tr>
+                  <th scope="col">Parameter / source time</th>
+                </tr>
+              </thead>
+            </table>
+          </details>
+        </section>
+        <div id="timeline-readout"></div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span class="status-dot"></span><output id="status">Ready</output
+      ><span class="footer-mode" id="footer-mode">Local · No device connected</span>
+    </footer>
+    <video id="video" playsinline preload="auto" hidden></video>
+    <!-- model: pure logic, also used by the server and tests -->
+    <script src="js/model/preset-model.js"></script>
+    <script src="js/model/video-state.js"></script>
+    <script src="js/model/live-input.js"></script>
+    <script src="js/model/schedule-export.js"></script>
+    <!-- ui: the editor -->
+    <script src="js/ui/app.js"></script>
+    <script src="js/ui/library.js"></script>
+    <script src="js/ui/presets.js"></script>
+    <script src="js/ui/live.js"></script>
+  </body>
+</html>

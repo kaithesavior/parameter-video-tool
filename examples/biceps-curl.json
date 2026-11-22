@@ -1,0 +1,18 @@
+{
+  "kind": "stickies-preset",
+  "version": 1,
+  "video": "curls.mp4",
+  "preset": {
+    "name": "Biceps curl walkthrough",
+    "cues": [
+      { "time": 0, "label": "Full view, normal speed", "parameters": { "speed": 1, "zoom": 1 } },
+      {
+        "time": 2,
+        "label": "Close-up on the right arm, slow motion",
+        "parameters": { "speed": 0.5, "zoom": 2.5, "x": 40, "y": 42 }
+      },
+      { "time": 4.5, "label": "Fast replay", "parameters": { "speed": 2, "zoom": 1 } },
+      { "time": 6.5, "label": "Back to normal", "parameters": { "speed": 1, "zoom": 1 } }
+    ]
+  }
+}
